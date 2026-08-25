@@ -1,0 +1,15 @@
+# Entorno — NUNCA commitear valores reales
+.env
+.env.*
+!.env.example
+
+# Sistema / editor
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+vendor/
+composer.lock
+.phpunit.cache/
+.phpunit.result.cache
