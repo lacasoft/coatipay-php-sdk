@@ -1,4 +1,4 @@
-# coatipay/coatipay — PHP SDK
+# lacasoft/coatipay-sdk — PHP SDK
 
 The CoatiPay PHP SDK — **Stripe-compatible payments for the open web**.
 Accept **USDC on Base** with no gatekeepers: gasless settlement (ERC-3009), webhooks, and
@@ -6,21 +6,12 @@ x402 micropayments. ~1% protocol fee (0.7% nodeit / 0.3% treasury), settled trus
 
 - ⛽ **Gasless for payers** — they sign an ERC-3009 authorization; the nodeit pays the gas.
 - 🧩 **Stripe-like DX** — `paymentIntents->create(...)`, `webhooks->verify(...)`.
-- 🌐 **Open network** — no lock-in, self-host or use any nodeit.
+- 🌐 **Open network** — no lock-in: any nodeit can settle your payments, and anyone can run one.
 
 ## Install
 
-Packagist publication is **pending**. Until it lands, install from the Git repository:
-
 ```bash
-composer config repositories.coatipay vcs https://github.com/lacasoft/coatipay-protocol
-composer require coatipay/coatipay:dev-master
-```
-
-Once published, it will be the usual:
-
-```bash
-composer require coatipay/coatipay
+composer require lacasoft/coatipay-sdk
 ```
 
 Requires PHP ≥ 8.1. Depends on `guzzlehttp/guzzle`.
@@ -127,5 +118,5 @@ roadmap via off-chain **netting** (aggregating many tiny payments into one on-ch
 ## Links
 
 - Repo, docs & protocol spec: https://github.com/lacasoft/coatipay-protocol
-- Source: [`packages/sdk-php`](https://github.com/lacasoft/coatipay-protocol/tree/master/packages/sdk-php)
+- Source: [`coatipay-php-sdk`](https://github.com/lacasoft/coatipay-php-sdk)
 - License: Apache-2.0
