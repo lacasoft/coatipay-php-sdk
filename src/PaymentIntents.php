@@ -51,10 +51,11 @@ class PaymentIntents
      * Construye el typed data EIP-712 de USDC `ReceiveWithAuthorization`.
      *
      * El nonce del mensaje sale del `$intentId`, no de un aleatorio: el contrato
-     * exige `nonce == intentId` para que el nodeit no pueda redirigir la firma a
-     * otro intent.
+     * exige que coincida con el intent para que el nodeit no pueda redirigir la
+     * firma a otro. Se pasa el id textual y la derivación a bytes32 ocurre
+     * dentro, para que nadie tenga que calcular el keccak a mano y equivocarse.
      *
-     * @param string $intentId Identificador on-chain del intent que se paga (bytes32: 0x + 64 hex).
+     * @param string $intentId Identificador del intent tal cual lo devuelve la API (`pi_…`).
      * @param array<string, mixed> $options `validAfter` / `validBefore`, en segundos Unix.
      * @return array<string, mixed>
      */
@@ -74,7 +75,8 @@ class PaymentIntents
      *
      * `$intentId` es obligatorio: es el que ata la firma a un único intent.
      *
-     * @param string $intentId Identificador on-chain del intent que se paga (bytes32: 0x + 64 hex).
+     * @param string $intentId Identificador del intent tal cual lo devuelve la API (`pi_…`);
+     *                         el bytes32 del nonce se deriva dentro.
      * @param array<string, mixed> $options `validAfter` / `validBefore`, en segundos Unix.
      */
     public function signAuthorization(

@@ -36,14 +36,47 @@ class Eip712
     private const RECEIVE_WITH_AUTHORIZATION_TYPEHASH = 'd099cc98ef71107a616c4f0f941f04c322d8e254fe26b3c6668db87aae413de8';
 
     /**
+     * Identificador on-chain de un intent, a partir del `pi_…` que devuelve la API.
+     *
+     * Es `keccak256(utf8(id))`, la misma derivación que usan el contrato, el
+     * daemon y los SDK de JavaScript y Python. Se expone porque quien construya
+     * la autorización a mano necesita exactamente este valor, y calcularlo de
+     * otra forma produce una firma atada a un intent que no existe.
+     *
+     * El id NO se normaliza (ni trim ni minúsculas): cualquier retoque cambiaría
+     * el hash y dejaría de coincidir con el id que guarda la API.
+     */
+    public static function intentIdToBytes32(string $intentId): string
+    {
+        if ($intentId === '') {
+            throw new \InvalidArgumentException('intentId is required');
+        }
+        // Salvavidas de migración: hasta la versión anterior este SDK pedía el
+        // bytes32 ya derivado. Si alguien sigue pasándolo, hashearlo otra vez
+        // daría un nonce silenciosamente equivocado, y el fallo solo aparecería
+        // al liquidar. Un id de la API es `pi_…`, nunca 0x + 64 hex.
+        if (preg_match('/^0x[a-fA-F0-9]{64}$/', $intentId)) {
+            throw new \InvalidArgumentException(
+                "Invalid intent id: {$intentId} (expected the API id, e.g. \"pi_abc123\", not a bytes32)"
+            );
+        }
+        // Sobre los bytes utf-8 del id, siempre. No se usa el helper interno
+        // `keccak256()` porque ese trata un `0x…` como hexadecimal, y aquí el
+        // id es texto pase lo que pase.
+        return '0x' . Keccak::hash($intentId, 256);
+    }
+
+    /**
      * Construye el typed data EIP-712 de USDC `ReceiveWithAuthorization`.
      *
-     * El nonce ya no se elige: ES el `$intentId`. El contrato exige
-     * `nonce == intentId`, y esa atadura es justo lo que impide que el nodeit
+     * El nonce ya no se elige: ES el intent. El contrato exige que el nonce
+     * coincida con el `intentId` on-chain —el bytes32 que se deriva aquí del
+     * `pi_…`—, y esa atadura es justo lo que impide que el nodeit
      * —la parte no confiable, la que envía la transacción— aplique la firma del
      * pagador a OTRO intent y se quede el pago.
      *
-     * @param string $intentId Identificador on-chain del intent que se paga (bytes32: 0x + 64 hex).
+     * @param string $intentId Identificador del intent tal cual lo devuelve la API (`pi_…`);
+     *                         el bytes32 del nonce se deriva aquí dentro.
      * @param array<string, mixed> $options `validAfter` / `validBefore`, en segundos Unix.
      * @return array<string, mixed>
      */
@@ -59,7 +92,8 @@ class Eip712
         $validAfter = $options['validAfter'] ?? 0;
         $validBefore = $options['validBefore'] ?? ($nowSeconds + self::DEFAULT_VALIDITY_WINDOW_SECONDS);
         // El nonce ES el intent: así la firma solo sirve para pagar ese intent.
-        $nonce = self::assertIntentId($intentId);
+        // Se deriva aquí para que nadie tenga que calcular el keccak por su cuenta.
+        $nonce = self::intentIdToBytes32($intentId);
 
         return [
             'domain' => [
@@ -144,7 +178,8 @@ class Eip712
      * atadura, la firma resultante podría reutilizarse para liquidar un intent
      * distinto del que autorizó el pagador.
      *
-     * @param string $intentId Identificador on-chain del intent que se paga (bytes32: 0x + 64 hex).
+     * @param string $intentId Identificador del intent tal cual lo devuelve la API (`pi_…`);
+     *                         el bytes32 del nonce se deriva aquí dentro.
      * @param array<string, mixed> $options `validAfter` / `validBefore`, en segundos Unix.
      */
     public static function signAuthorization(
@@ -279,24 +314,6 @@ class Eip712
     {
         $hex = str_starts_with($value, '0x') ? substr($value, 2) : $value;
         return str_pad($hex, 64, '0', STR_PAD_LEFT);
-    }
-
-    /**
-     * Comprueba que el intent sea un bytes32 en hexadecimal y lo devuelve tal cual.
-     *
-     * En PHP no hay un tipo `Hex` que lo garantice en tiempo de compilación como
-     * en el SDK de JavaScript, y un valor más corto lo rellenaría `normalizeHex32`
-     * por la izquierda: la firma quedaría atada a un bytes32 distinto del intent
-     * que el pagador cree estar pagando. Mejor fallar al firmar que al liquidar.
-     */
-    private static function assertIntentId(string $value): string
-    {
-        if (!preg_match('/^0x[a-fA-F0-9]{64}$/', $value)) {
-            throw new \InvalidArgumentException(
-                "Invalid intent id: {$value} (expected 32-byte hex, 0x + 64 chars)"
-            );
-        }
-        return $value;
     }
 
     private static function normalizeAddress(string $value): string
