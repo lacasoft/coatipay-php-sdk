@@ -7,6 +7,15 @@ use CoatiPay\Eip712;
 
 class Eip712Test extends TestCase
 {
+    /**
+     * Identificador on-chain de un intent (bytes32). Es también el nonce que
+     * acaba en el mensaje firmado: el contrato exige `nonce == intentId`.
+     */
+    private const INTENT_ID = '0xbeef000000000000000000000000000000000000000000000000000000000000';
+
+    /** Otro intent cualquiera, para comprobar que una firma no sirve para los dos. */
+    private const OTRO_INTENT_ID = '0xdead000000000000000000000000000000000000000000000000000000000000';
+
     public function testBuildAuthorizationTypedData(): void
     {
         $typed = Eip712::buildAuthorizationTypedData(
@@ -14,8 +23,8 @@ class Eip712Test extends TestCase
             1_000_000,
             '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
             'base-sepolia',
+            self::INTENT_ID,
             [
-                'nonce' => '0x' . str_repeat('00', 32),
                 'validAfter' => 0,
                 'validBefore' => 2_000_000_000,
             ]
@@ -33,19 +42,88 @@ class Eip712Test extends TestCase
         $this->assertEquals(1_000_000, $msg['value']);
         $this->assertEquals(0, $msg['validAfter']);
         $this->assertEquals(2_000_000_000, $msg['validBefore']);
-        $this->assertEquals('0x' . str_repeat('00', 32), $msg['nonce']);
+        // El campo del mensaje se sigue llamando `nonce` (lo fija ERC-3009);
+        // lo que cambia es de dónde sale su valor.
+        $this->assertEquals(self::INTENT_ID, $msg['nonce']);
     }
 
-    public function testSignAuthorizationMatchesJsSdkReference(): void
+    public function testNonceEsElIntentId(): void
     {
+        // La atadura, explícita: el nonce del mensaje ES el intent que se paga.
+        // Sin ella, el nodeit —quien envía la transacción, la parte no confiable—
+        // podía tomar esta firma y aplicarla a otro intent para quedarse el pago.
+        $typed = Eip712::buildAuthorizationTypedData(
+            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            5_000_000,
+            '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
+            'base-sepolia',
+            self::INTENT_ID,
+        );
+
+        $this->assertEquals(self::INTENT_ID, $typed['message']['nonce']);
+    }
+
+    public function testFirmaAtadaAlIntentTambienAlFirmar(): void
+    {
+        // Lo mismo, pero de punta a punta: la autorización firmada arrastra el
+        // intent en su nonce, y firmar el mismo pago para otro intent produce
+        // otra firma. Es decir: una firma sirve para un solo intent.
         $auth = Eip712::signAuthorization(
             '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             1_000_000,
             '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
             'base-sepolia',
+            self::INTENT_ID,
+            '0x' . str_repeat('11', 32),
+            ['validAfter' => 0, 'validBefore' => 2_000_000_000],
+        );
+
+        $otra = Eip712::signAuthorization(
+            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            1_000_000,
+            '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
+            'base-sepolia',
+            self::OTRO_INTENT_ID,
+            '0x' . str_repeat('11', 32),
+            ['validAfter' => 0, 'validBefore' => 2_000_000_000],
+        );
+
+        $this->assertEquals(self::INTENT_ID, $auth->nonce);
+        $this->assertEquals(self::OTRO_INTENT_ID, $otra->nonce);
+        $this->assertNotEquals($auth->signature, $otra->signature);
+    }
+
+    public function testRechazaUnIntentIdQueNoEsBytes32(): void
+    {
+        // PHP no tiene el tipo `Hex` del SDK de JavaScript, así que la guarda es
+        // en tiempo de ejecución: un intent mal formado se rellenaría por la
+        // izquierda y ataría la firma a un bytes32 que no es el intent.
+        $this->expectException(\InvalidArgumentException::class);
+
+        Eip712::buildAuthorizationTypedData(
+            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            1_000_000,
+            '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
+            'base-sepolia',
+            '0xbeef',
+        );
+    }
+
+    public function testSignAuthorizationMatchesJsSdkReference(): void
+    {
+        // Vector cruzado con el SDK de JavaScript. El nonce del vector (32 bytes
+        // a cero) ahora entra como intentId, así que el digest firmado —y por
+        // tanto la firma esperada— no cambia.
+        $intentId = '0x' . str_repeat('00', 32);
+
+        $auth = Eip712::signAuthorization(
+            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            1_000_000,
+            '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
+            'base-sepolia',
+            $intentId,
             '0x' . str_repeat('11', 32),
             [
-                'nonce' => '0x' . str_repeat('00', 32),
                 'validAfter' => 0,
                 'validBefore' => 2_000_000_000,
             ]
@@ -58,7 +136,7 @@ class Eip712Test extends TestCase
         $this->assertEquals('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', $auth->payer);
         $this->assertEquals(0, $auth->validAfter);
         $this->assertEquals(2_000_000_000, $auth->validBefore);
-        $this->assertEquals('0x' . str_repeat('00', 32), $auth->nonce);
+        $this->assertEquals($intentId, $auth->nonce);
         $this->assertEquals($expectedSignature, $auth->signature);
     }
 
@@ -86,7 +164,7 @@ class Eip712Test extends TestCase
             '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             0,
             2_000_000_000,
-            '0x' . str_repeat('00', 32),
+            self::INTENT_ID,
             '0x' . str_repeat('11', 65),
         );
 
@@ -95,16 +173,9 @@ class Eip712Test extends TestCase
         $this->assertEquals('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', $serialized['payer']);
         $this->assertEquals('0', $serialized['valid_after']);
         $this->assertEquals('2000000000', $serialized['valid_before']);
-        $this->assertEquals('0x' . str_repeat('00', 32), $serialized['nonce']);
+        // El wire format sigue mandando el campo `nonce`, con el intent dentro.
+        $this->assertEquals(self::INTENT_ID, $serialized['nonce']);
         $this->assertEquals('0x' . str_repeat('11', 65), $serialized['signature']);
-    }
-
-    public function testGenerateNonce(): void
-    {
-        $nonce = Eip712::generateNonce();
-        $this->assertStringStartsWith('0x', $nonce);
-        $this->assertEquals(66, strlen($nonce));
-        $this->assertNotEquals(Eip712::generateNonce(), $nonce);
     }
 
     public function testHashTypedData(): void
@@ -114,8 +185,8 @@ class Eip712Test extends TestCase
             1_000_000,
             '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
             'base-sepolia',
+            self::INTENT_ID,
             [
-                'nonce' => '0x' . str_repeat('00', 32),
                 'validAfter' => 0,
                 'validBefore' => 2_000_000_000,
             ]
@@ -130,18 +201,20 @@ class Eip712Test extends TestCase
     {
         // USDC's OpenZeppelin ECDSA rejects high-s signatures (EIP-2). Without
         // canonical signing ~50% of nonces produce high-s → on-chain revert.
+        // Cada vuelta firma un intent distinto, que es lo que mueve el nonce.
         $n  = gmp_init('fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141', 16);
         $nh = gmp_div_q($n, 2);
 
         for ($i = 1; $i <= 12; $i++) {
+            $intentId = '0x' . str_pad(dechex($i), 64, '0', STR_PAD_LEFT);
             $auth = Eip712::signAuthorization(
                 '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
                 1_000_000,
                 '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
                 'base-sepolia',
+                $intentId,
                 '0x' . str_repeat('11', 32),
                 [
-                    'nonce' => '0x' . str_pad(dechex($i), 64, '0', STR_PAD_LEFT),
                     'validAfter' => 0,
                     'validBefore' => 2_000_000_000,
                 ]
@@ -150,7 +223,7 @@ class Eip712Test extends TestCase
             $this->assertLessThanOrEqual(
                 0,
                 gmp_cmp($s, $nh),
-                "signature for nonce {$i} has high-s (would revert on-chain)"
+                "signature for intent {$i} has high-s (would revert on-chain)"
             );
         }
     }

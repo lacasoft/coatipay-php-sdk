@@ -53,11 +53,17 @@ $auth = Eip712::signAuthorization(
     amount:   1_000_000,                       // 1.00 USDC
     settlementHub: '0xSettlementHubAddress...',
     chain:    'base',
+    intentId: '0xIntentId...',                  // on-chain intent id (bytes32) — becomes the nonce
     privateKey: '0x...',                        // payer private key — server-side demo only
 );
 
 $relay->paymentIntents->submitAuthorization('pi_...', $auth);
 ```
+
+`intentId` is required: the authorization's ERC-3009 nonce **is** that intent id.
+The SettlementHub enforces `nonce == intentId`, so a signature can only ever pay
+the intent it was signed for — the nodeit that submits the transaction cannot
+redirect it to a different intent.
 
 For batch settlement, pass a list of `['intent_id' => ..., 'authorization' => $auth]`
 items to `$relay->paymentIntents->submitAuthorizationBatch($items)` (max 50 per batch).

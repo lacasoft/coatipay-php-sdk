@@ -48,9 +48,14 @@ class PaymentIntents
     // ── Gasless settlement (ERC-3009 / ADR-003) ─────────────────────────
 
     /**
-     * Build the EIP-712 typed data for USDC ReceiveWithAuthorization.
+     * Construye el typed data EIP-712 de USDC `ReceiveWithAuthorization`.
      *
-     * @param array<string, mixed> $options
+     * El nonce del mensaje sale del `$intentId`, no de un aleatorio: el contrato
+     * exige `nonce == intentId` para que el nodeit no pueda redirigir la firma a
+     * otro intent.
+     *
+     * @param string $intentId Identificador on-chain del intent que se paga (bytes32: 0x + 64 hex).
+     * @param array<string, mixed> $options `validAfter` / `validBefore`, en segundos Unix.
      * @return array<string, mixed>
      */
     public function buildAuthorizationTypedData(
@@ -58,25 +63,30 @@ class PaymentIntents
         int $amount,
         string $settlementHub,
         string $chain,
+        string $intentId,
         array $options = [],
     ): array {
-        return Eip712::buildAuthorizationTypedData($payer, $amount, $settlementHub, $chain, $options);
+        return Eip712::buildAuthorizationTypedData($payer, $amount, $settlementHub, $chain, $intentId, $options);
     }
 
     /**
-     * Build and sign a ReceiveWithAuthorization message.
+     * Construye y firma un mensaje `ReceiveWithAuthorization`.
      *
-     * @param array<string, mixed> $options
+     * `$intentId` es obligatorio: es el que ata la firma a un único intent.
+     *
+     * @param string $intentId Identificador on-chain del intent que se paga (bytes32: 0x + 64 hex).
+     * @param array<string, mixed> $options `validAfter` / `validBefore`, en segundos Unix.
      */
     public function signAuthorization(
         string $payer,
         int $amount,
         string $settlementHub,
         string $chain,
+        string $intentId,
         string $privateKey,
         array $options = [],
     ): SignedAuthorization {
-        return Eip712::signAuthorization($payer, $amount, $settlementHub, $chain, $privateKey, $options);
+        return Eip712::signAuthorization($payer, $amount, $settlementHub, $chain, $intentId, $privateKey, $options);
     }
 
     public function submitAuthorization(string $intentId, SignedAuthorization $authorization): array

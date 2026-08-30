@@ -36,9 +36,15 @@ class Eip712
     private const RECEIVE_WITH_AUTHORIZATION_TYPEHASH = 'd099cc98ef71107a616c4f0f941f04c322d8e254fe26b3c6668db87aae413de8';
 
     /**
-     * Build the EIP-712 typed data for USDC ReceiveWithAuthorization.
+     * Construye el typed data EIP-712 de USDC `ReceiveWithAuthorization`.
      *
-     * @param array<string, mixed> $options
+     * El nonce ya no se elige: ES el `$intentId`. El contrato exige
+     * `nonce == intentId`, y esa atadura es justo lo que impide que el nodeit
+     * —la parte no confiable, la que envía la transacción— aplique la firma del
+     * pagador a OTRO intent y se quede el pago.
+     *
+     * @param string $intentId Identificador on-chain del intent que se paga (bytes32: 0x + 64 hex).
+     * @param array<string, mixed> $options `validAfter` / `validBefore`, en segundos Unix.
      * @return array<string, mixed>
      */
     public static function buildAuthorizationTypedData(
@@ -46,12 +52,14 @@ class Eip712
         int $amount,
         string $settlementHub,
         string $chain,
+        string $intentId,
         array $options = [],
     ): array {
         $nowSeconds = time();
         $validAfter = $options['validAfter'] ?? 0;
         $validBefore = $options['validBefore'] ?? ($nowSeconds + self::DEFAULT_VALIDITY_WINDOW_SECONDS);
-        $nonce = $options['nonce'] ?? self::generateNonce();
+        // El nonce ES el intent: así la firma solo sirve para pagar ese intent.
+        $nonce = self::assertIntentId($intentId);
 
         return [
             'domain' => [
@@ -130,19 +138,25 @@ class Eip712
     }
 
     /**
-     * Build and sign a ReceiveWithAuthorization message.
+     * Construye y firma un mensaje `ReceiveWithAuthorization`.
      *
-     * @param array<string, mixed> $options
+     * `$intentId` es obligatorio porque el nonce se deriva de él: sin esa
+     * atadura, la firma resultante podría reutilizarse para liquidar un intent
+     * distinto del que autorizó el pagador.
+     *
+     * @param string $intentId Identificador on-chain del intent que se paga (bytes32: 0x + 64 hex).
+     * @param array<string, mixed> $options `validAfter` / `validBefore`, en segundos Unix.
      */
     public static function signAuthorization(
         string $payer,
         int $amount,
         string $settlementHub,
         string $chain,
+        string $intentId,
         string $privateKey,
         array $options = [],
     ): SignedAuthorization {
-        $typedData = self::buildAuthorizationTypedData($payer, $amount, $settlementHub, $chain, $options);
+        $typedData = self::buildAuthorizationTypedData($payer, $amount, $settlementHub, $chain, $intentId, $options);
         $digest = self::hashTypedData($typedData);
 
         $privateKey = str_starts_with($privateKey, '0x') ? substr($privateKey, 2) : $privateKey;
@@ -206,14 +220,6 @@ class Eip712
         ];
     }
 
-    /**
-     * Generate a cryptographically random 32-byte nonce as 0x-prefixed hex.
-     */
-    public static function generateNonce(): string
-    {
-        return '0x' . bin2hex(random_bytes(32));
-    }
-
     /** USDC contract address for the given chain (falls back to Base mainnet). */
     public static function usdcAddress(string $chain): string
     {
@@ -273,6 +279,24 @@ class Eip712
     {
         $hex = str_starts_with($value, '0x') ? substr($value, 2) : $value;
         return str_pad($hex, 64, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Comprueba que el intent sea un bytes32 en hexadecimal y lo devuelve tal cual.
+     *
+     * En PHP no hay un tipo `Hex` que lo garantice en tiempo de compilación como
+     * en el SDK de JavaScript, y un valor más corto lo rellenaría `normalizeHex32`
+     * por la izquierda: la firma quedaría atada a un bytes32 distinto del intent
+     * que el pagador cree estar pagando. Mejor fallar al firmar que al liquidar.
+     */
+    private static function assertIntentId(string $value): string
+    {
+        if (!preg_match('/^0x[a-fA-F0-9]{64}$/', $value)) {
+            throw new \InvalidArgumentException(
+                "Invalid intent id: {$value} (expected 32-byte hex, 0x + 64 chars)"
+            );
+        }
+        return $value;
     }
 
     private static function normalizeAddress(string $value): string
