@@ -2,7 +2,7 @@
 
 The CoatiPay PHP SDK — **Stripe-compatible payments for the open web**.
 Accept **USDC on Base** with no gatekeepers: gasless settlement (ERC-3009), webhooks, and
-x402 micropayments. ~1% protocol fee (0.7% nodeit / 0.3% treasury), settled trustlessly on-chain.
+x402 micropayments. 1.5% protocol fee (1.05% nodeit / 0.45% treasury), settled trustlessly on-chain.
 
 - ⛽ **Gasless for payers** — they sign an ERC-3009 authorization; the nodeit pays the gas.
 - 🧩 **Stripe-like DX** — `paymentIntents->create(...)`, `webhooks->verify(...)`.
@@ -124,10 +124,11 @@ $relay = new CoatiPay(
 
 ## Economics
 
-The protocol fee is ~1% (0.7% nodeit / 0.3% treasury), settled on-chain. The API enforces a
-**minimum payment floor (~$0.30)** — intents below it are rejected, because below that point the
-protocol fee can't cover settlement gas even when batched. Sub-cent x402 micropayments are on the
-roadmap via off-chain **netting** (aggregating many tiny payments into one on-chain settlement).
+The protocol fee is 1.5% (1.05% nodeit / 0.45% treasury), settled on-chain. The API enforces a
+**minimum payment floor (~$0.30)** — intents below it are rejected, because around that point the
+protocol fee stops covering settlement gas reliably, even when batched. Sub-cent x402
+micropayments are on the roadmap via off-chain **netting** (aggregating many tiny payments into
+one on-chain settlement).
 
 ## Links
 
