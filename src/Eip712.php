@@ -36,9 +36,48 @@ class Eip712
     private const RECEIVE_WITH_AUTHORIZATION_TYPEHASH = 'd099cc98ef71107a616c4f0f941f04c322d8e254fe26b3c6668db87aae413de8';
 
     /**
-     * Build the EIP-712 typed data for USDC ReceiveWithAuthorization.
+     * Identificador on-chain de un intent, a partir del `pi_…` que devuelve la API.
      *
-     * @param array<string, mixed> $options
+     * Es `keccak256(utf8(id))`, la misma derivación que usan el contrato, el
+     * daemon y los SDK de JavaScript y Python. Se expone porque quien construya
+     * la autorización a mano necesita exactamente este valor, y calcularlo de
+     * otra forma produce una firma atada a un intent que no existe.
+     *
+     * El id NO se normaliza (ni trim ni minúsculas): cualquier retoque cambiaría
+     * el hash y dejaría de coincidir con el id que guarda la API.
+     */
+    public static function intentIdToBytes32(string $intentId): string
+    {
+        if ($intentId === '') {
+            throw new \InvalidArgumentException('intentId is required');
+        }
+        // Salvavidas de migración: hasta la versión anterior este SDK pedía el
+        // bytes32 ya derivado. Si alguien sigue pasándolo, hashearlo otra vez
+        // daría un nonce silenciosamente equivocado, y el fallo solo aparecería
+        // al liquidar. Un id de la API es `pi_…`, nunca 0x + 64 hex.
+        if (preg_match('/^0x[a-fA-F0-9]{64}$/', $intentId)) {
+            throw new \InvalidArgumentException(
+                "Invalid intent id: {$intentId} (expected the API id, e.g. \"pi_abc123\", not a bytes32)"
+            );
+        }
+        // Sobre los bytes utf-8 del id, siempre. No se usa el helper interno
+        // `keccak256()` porque ese trata un `0x…` como hexadecimal, y aquí el
+        // id es texto pase lo que pase.
+        return '0x' . Keccak::hash($intentId, 256);
+    }
+
+    /**
+     * Construye el typed data EIP-712 de USDC `ReceiveWithAuthorization`.
+     *
+     * El nonce ya no se elige: ES el intent. El contrato exige que el nonce
+     * coincida con el `intentId` on-chain —el bytes32 que se deriva aquí del
+     * `pi_…`—, y esa atadura es justo lo que impide que el nodeit
+     * —la parte no confiable, la que envía la transacción— aplique la firma del
+     * pagador a OTRO intent y se quede el pago.
+     *
+     * @param string $intentId Identificador del intent tal cual lo devuelve la API (`pi_…`);
+     *                         el bytes32 del nonce se deriva aquí dentro.
+     * @param array<string, mixed> $options `validAfter` / `validBefore`, en segundos Unix.
      * @return array<string, mixed>
      */
     public static function buildAuthorizationTypedData(
@@ -46,12 +85,15 @@ class Eip712
         int $amount,
         string $settlementHub,
         string $chain,
+        string $intentId,
         array $options = [],
     ): array {
         $nowSeconds = time();
         $validAfter = $options['validAfter'] ?? 0;
         $validBefore = $options['validBefore'] ?? ($nowSeconds + self::DEFAULT_VALIDITY_WINDOW_SECONDS);
-        $nonce = $options['nonce'] ?? self::generateNonce();
+        // El nonce ES el intent: así la firma solo sirve para pagar ese intent.
+        // Se deriva aquí para que nadie tenga que calcular el keccak por su cuenta.
+        $nonce = self::intentIdToBytes32($intentId);
 
         return [
             'domain' => [
@@ -130,19 +172,26 @@ class Eip712
     }
 
     /**
-     * Build and sign a ReceiveWithAuthorization message.
+     * Construye y firma un mensaje `ReceiveWithAuthorization`.
      *
-     * @param array<string, mixed> $options
+     * `$intentId` es obligatorio porque el nonce se deriva de él: sin esa
+     * atadura, la firma resultante podría reutilizarse para liquidar un intent
+     * distinto del que autorizó el pagador.
+     *
+     * @param string $intentId Identificador del intent tal cual lo devuelve la API (`pi_…`);
+     *                         el bytes32 del nonce se deriva aquí dentro.
+     * @param array<string, mixed> $options `validAfter` / `validBefore`, en segundos Unix.
      */
     public static function signAuthorization(
         string $payer,
         int $amount,
         string $settlementHub,
         string $chain,
+        string $intentId,
         string $privateKey,
         array $options = [],
     ): SignedAuthorization {
-        $typedData = self::buildAuthorizationTypedData($payer, $amount, $settlementHub, $chain, $options);
+        $typedData = self::buildAuthorizationTypedData($payer, $amount, $settlementHub, $chain, $intentId, $options);
         $digest = self::hashTypedData($typedData);
 
         $privateKey = str_starts_with($privateKey, '0x') ? substr($privateKey, 2) : $privateKey;
@@ -204,14 +253,6 @@ class Eip712
             'nonce' => $auth->nonce,
             'signature' => $auth->signature,
         ];
-    }
-
-    /**
-     * Generate a cryptographically random 32-byte nonce as 0x-prefixed hex.
-     */
-    public static function generateNonce(): string
-    {
-        return '0x' . bin2hex(random_bytes(32));
     }
 
     /** USDC contract address for the given chain (falls back to Base mainnet). */

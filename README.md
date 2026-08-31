@@ -2,7 +2,7 @@
 
 The CoatiPay PHP SDK — **Stripe-compatible payments for the open web**.
 Accept **USDC on Base** with no gatekeepers: gasless settlement (ERC-3009), webhooks, and
-x402 micropayments. ~1% protocol fee (0.7% nodeit / 0.3% treasury), settled trustlessly on-chain.
+x402 micropayments. 1.5% protocol fee (1.05% nodeit / 0.45% treasury), settled trustlessly on-chain.
 
 - ⛽ **Gasless for payers** — they sign an ERC-3009 authorization; the nodeit pays the gas.
 - 🧩 **Stripe-like DX** — `paymentIntents->create(...)`, `webhooks->verify(...)`.
@@ -53,10 +53,24 @@ $auth = Eip712::signAuthorization(
     amount:   1_000_000,                       // 1.00 USDC
     settlementHub: '0xSettlementHubAddress...',
     chain:    'base',
+    intentId: $intent['id'],                    // the "pi_…" the API returned — becomes the nonce
     privateKey: '0x...',                        // payer private key — server-side demo only
 );
 
-$relay->paymentIntents->submitAuthorization('pi_...', $auth);
+$relay->paymentIntents->submitAuthorization($intent['id'], $auth);
+```
+
+`intentId` is required: the authorization's ERC-3009 nonce **is** that intent.
+The SettlementHub enforces `nonce == keccak256(utf8(intentId))`, so a signature
+can only ever pay the intent it was signed for — the nodeit that submits the
+transaction cannot redirect it to a different intent.
+
+Pass the plain `pi_…` id: the SDK derives the on-chain `bytes32` for you, so
+there is no hash to get wrong. If you build the typed data yourself, derive it
+with the same helper the SDK uses:
+
+```php
+$nonce = Eip712::intentIdToBytes32('pi_abc123'); // 0x… (32 bytes)
 ```
 
 For batch settlement, pass a list of `['intent_id' => ..., 'authorization' => $auth]`
@@ -110,10 +124,11 @@ $relay = new CoatiPay(
 
 ## Economics
 
-The protocol fee is ~1% (0.7% nodeit / 0.3% treasury), settled on-chain. The API enforces a
-**minimum payment floor (~$0.30)** — intents below it are rejected, because below that point the
-protocol fee can't cover settlement gas even when batched. Sub-cent x402 micropayments are on the
-roadmap via off-chain **netting** (aggregating many tiny payments into one on-chain settlement).
+The protocol fee is 1.5% (1.05% nodeit / 0.45% treasury), settled on-chain. The API enforces a
+**minimum payment floor (~$0.30)** — intents below it are rejected, because around that point the
+protocol fee stops covering settlement gas reliably, even when batched. Sub-cent x402
+micropayments are on the roadmap via off-chain **netting** (aggregating many tiny payments into
+one on-chain settlement).
 
 ## Links
 
