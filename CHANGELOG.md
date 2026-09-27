@@ -1,5 +1,12 @@
 # Changelog
 
+## Withdrawn versions — 2026-09-27
+
+**v0.1.0 cannot complete a payment**: it signs with a random nonce, and the API and the
+SettlementHub reject any authorization whose nonce is not the intent id (see 0.1.2 below).
+Its tag was deleted, so **Packagist no longer offers it** (0.1.1 was never tagged). Use
+**v0.1.2 or later**.
+
 ## 0.1.2 — 2026-09-01
 
 ### ⚠️ Breaking: `intentId` is now required when signing
