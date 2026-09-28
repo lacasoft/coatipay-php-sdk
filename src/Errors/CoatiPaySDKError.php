@@ -23,11 +23,16 @@ class CoatiPaySDKError extends Exception
         string $code,
         string $message,
         ?string $param = null,
-        string $docUrl = 'https://docs.coatipay.com'
+        ?string $docUrl = null
     ) {
         parent::__construct($message);
         $this->errorCode = $code;
         $this->param     = $param;
-        $this->docUrl    = $docUrl;
+        // Sin doc_url: la página del código si es del catálogo, o el índice de
+        // errores (p. ej. un fallo de red). Antes era https://docs.coatipay.com,
+        // que no existe.
+        $this->docUrl = $docUrl ?? (isset(Catalogo::CATEGORIAS[$code])
+            ? "https://coatipay.com/docs/errors/{$code}"
+            : 'https://coatipay.com/docs/errors/');
     }
 }

@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.1.3 — 2026-09-28
+
+### Fixed
+
+- **`intentIdToBytes32` rejects a whitespace-only id**, as it already did an
+  empty one. It used to hash it into a nonce that looks valid and belongs to no
+  intent. Found by the shared vectors.
+- **`webhooks->verify` accepts a secret rotation**: the request is valid if
+  **any** `v1` matches. It used to check only the last one.
+- **`webhooks->verify` no longer takes `1e3` or `12.5` as a timestamp**
+  (`is_numeric`): `t` must be all digits.
+- **`docUrl` fallback.** When the API sends none, it points to the code's real
+  page (`https://coatipay.com/docs/errors/<code>`), or to the error index for a
+  code outside the catalog; it used to be `https://docs.coatipay.com`, which
+  does not exist.
+
+### Changed
+
+- **`webhooks->verify` follows the rules shared by every CoatiPay SDK**
+  (vectors in `@lacasoft/coatipay-protocol`): `t` once, spaces around parts
+  ignored, `['tolerance' => …, 'now' => …]` options. It throws
+  `WebhookSignatureError` — still an `InvalidArgumentException`, with the same
+  messages — carrying a `reason`: `malformed_header`,
+  `timestamp_out_of_tolerance` or `no_matching_signature`.
+- **API errors are thrown with their class**: `AuthError`, `ValidationError`,
+  `RoutingError`, `PaymentError` or `RateLimitError` by the code's catalog
+  category, as in the JS and Python SDKs. All of them extend
+  `CoatiPaySDKError`, so existing `catch (CoatiPaySDKError $e)` still works.
+
+### Added
+
+- `webhooks->listDeadLetters(?int $limit)` and
+  `webhooks->replayDeadLetter(string $id)`: deliveries that exhausted their
+  retries, and sending one again.
+- **Tests against the shared vectors** (`tests/vectors`, a copy of the latest
+  published protocol's, checked in CI): the authorization nonce, the full
+  ERC-3009 authorization per network (domain, message, digest, signature and
+  API body — this SDK hashes EIP-712 by hand, and it matches), the 21 webhook
+  cases and every error class. `src/Errors/Catalogo.php` is generated from
+  them (`php bin/generar-catalogo.php`).
+
 ## Withdrawn versions — 2026-09-27
 
 **v0.1.0 cannot complete a payment**: it signs with a random nonce, and the API and the

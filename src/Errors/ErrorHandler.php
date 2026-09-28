@@ -13,11 +13,24 @@ class ErrorHandler
      */
     public static function classify(array $error): CoatiPaySDKError
     {
-        return new CoatiPaySDKError(
-            $error['code'] ?? 'unknown_error',
+        $code = $error['code'] ?? 'unknown_error';
+        // La clase más concreta según la categoría del código, como en los SDK
+        // de JS y Python (vectores compartidos: errores.json). Un código que
+        // este SDK no conoce (una API más nueva) es la clase base.
+        $clase = self::CLASES[Catalogo::CATEGORIAS[$code] ?? ''] ?? CoatiPaySDKError::class;
+        return new $clase(
+            $code,
             $error['message'] ?? 'Unknown error',
             $error['param'] ?? null,
-            $error['doc_url'] ?? 'https://docs.coatipay.com'
+            $error['doc_url'] ?? null,
         );
     }
+
+    private const CLASES = [
+        'auth' => AuthError::class,
+        'validation' => ValidationError::class,
+        'routing' => RoutingError::class,
+        'payment' => PaymentError::class,
+        'rate_limit' => RateLimitError::class,
+    ];
 }
