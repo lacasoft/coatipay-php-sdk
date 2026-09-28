@@ -48,7 +48,9 @@ class Eip712
      */
     public static function intentIdToBytes32(string $intentId): string
     {
-        if ($intentId === '') {
+        // Vacío o solo espacios: su hash sería un nonce que parece válido y no
+        // es el de ningún intent (vectores compartidos, nonce.json → rechazados).
+        if (trim($intentId) === '') {
             throw new \InvalidArgumentException('intentId is required');
         }
         // Salvavidas de migración: hasta la versión anterior este SDK pedía el
