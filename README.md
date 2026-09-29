@@ -33,6 +33,8 @@ $intent = $relay->paymentIntents->create(
     currency: 'usdc',
     chain:    'base',
     metadata: ['order_id' => '123'],
+    // Safe to retry: the same key with the same parameters returns the same intent.
+    idempotencyKey: 'order_123',
 );
 
 echo $intent['id'], ' ', $intent['status'];  // "pi_…", "created"
@@ -97,19 +99,65 @@ $app->add(new X402Middleware($relay, [
 ## Webhooks
 
 ```php
-$event = $relay->webhooks->verify(
-    $payload,                                   // raw request body (string)
-    $_SERVER['HTTP_X_SIGNATURE'],       // X-Signature header
-    'whsec_...',
-);
+use CoatiPay\Errors\WebhookSignatureError;
 
+try {
+    $event = $relay->webhooks->verify(
+        file_get_contents('php://input'),       // the RAW request body
+        $_SERVER['HTTP_X_SIGNATURE'] ?? '',     // X-Signature header
+        'whsec_...',
+    );
+} catch (WebhookSignatureError $e) {
+    http_response_code(400);
+    exit($e->reason);
+}
+
+// At least once and in no particular order: deduplicate by $event['id'].
 if ($event['type'] === 'payment_intent.settled') {
     fulfillOrder($event['data']['metadata']['order_id']);
 }
 ```
 
-`verify()` checks the HMAC-SHA256 signature and rejects payloads whose timestamp is older
-than 5 minutes (replay protection). It throws `\InvalidArgumentException` on any mismatch.
+- `verify()` checks the HMAC-SHA256 signature in constant time and rejects a timestamp more
+  than 5 minutes away from now (replay protection): `['tolerance' => …]` changes it, in
+  seconds.
+- On failure it throws `WebhookSignatureError` (an `\InvalidArgumentException`) with a
+  `reason`: `malformed_header`, `timestamp_out_of_tolerance` or `no_matching_signature`.
+- Events: `payment_intent.created`, `payment_intent.settled`, `payment_intent.expired`,
+  `payment_intent.cancelled`.
+- **Changing the secret.** The API does not rotate secrets yet. Register a second endpoint
+  with the same URL, verify with either secret while both exist (the same event arrives
+  through each, with the same `$event['id']`), then delete the old one. `verify()` already
+  accepts a header with several `v1` signatures, for when the API signs with two.
+- **Deliveries that exhausted their retries** stay in a dead-letter queue:
+
+  ```php
+  $dead = $relay->webhooks->listDeadLetters(20);
+  $relay->webhooks->replayDeadLetter($dead['data'][0]['id']);  // same event, same id
+  ```
+
+## Errors
+
+```php
+use CoatiPay\Errors\CoatiPaySDKError;
+use CoatiPay\Errors\NetworkError;
+
+try {
+    $relay->paymentIntents->create($amount, 'usdc', 'base', idempotencyKey: $orderId);
+} catch (NetworkError $e) {
+    // No CoatiPay answer ($e->status: the HTTP status, or null). Whether it took effect is
+    // unknown: retrying with the same idempotencyKey returns the same intent.
+} catch (CoatiPaySDKError $e) {
+    echo $e->errorCode, ' ', $e->getMessage(), ' ', $e->param, ' ', $e->docUrl;
+}
+```
+
+Everything a call throws is a `CoatiPaySDKError`, with `errorCode`, the message, `param` and
+`docUrl` (the code's page at [coatipay.com/docs/errors](https://coatipay.com/docs/errors/)).
+The class tells the kind: `AuthError`, `ValidationError`, `RoutingError`, `PaymentError`,
+`RateLimitError`, or the base class for the rest and for a code this version does not know.
+`NetworkError` is one too, so catch it first. The same classes and rules in the JS and
+Python SDKs.
 
 ## Configuration
 

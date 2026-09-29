@@ -7,6 +7,7 @@ namespace CoatiPay\Tests;
 use CoatiPay\CoatiPay;
 use CoatiPay\Errors\AuthError;
 use CoatiPay\Errors\CoatiPaySDKError;
+use CoatiPay\Errors\NetworkError;
 use CoatiPay\Errors\RateLimitError;
 use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
@@ -90,7 +91,24 @@ class DlqYErroresTest extends TestCase
         } catch (CoatiPaySDKError $e) {
             $this->assertSame('https://coatipay.com/docs/errors/intent_not_found', $e->docUrl);
         }
-        // Un código fuera del catálogo (un fallo de red) apunta al índice.
-        $this->assertSame('https://coatipay.com/docs/errors/', (new CoatiPaySDKError('network_error', 'x'))->docUrl);
+        // Un código del SDK sin página propia apunta al índice; NetworkError, a la suya.
+        $this->assertSame('https://coatipay.com/docs/errors/', (new CoatiPaySDKError('api_key_required', 'x'))->docUrl);
+        $this->assertSame('https://coatipay.com/docs/errors/network_error', (new NetworkError('x'))->docUrl);
+    }
+
+    public function testCreateConIdempotencyKeyLaMandaEnLaCabecera(): void
+    {
+        $cliente = $this->cliente(new Response(201, [], json_encode(['id' => 'pi_1', 'status' => 'created'])));
+        $cliente->paymentIntents->create(1000000, 'usdc', 'base', ['order_id' => 'o_1'], 'order_123');
+        $peticion = $this->historial[0]['request'];
+        $this->assertSame('order_123', $peticion->getHeaderLine('Idempotency-Key'));
+        $this->assertArrayNotHasKey('idempotency_key', json_decode((string) $peticion->getBody(), true));
+    }
+
+    public function testCreateSinIdempotencyKeyNoMandaCabecera(): void
+    {
+        $cliente = $this->cliente(new Response(201, [], json_encode(['id' => 'pi_1', 'status' => 'created'])));
+        $cliente->paymentIntents->create(1000000, 'usdc', 'base');
+        $this->assertFalse($this->historial[0]['request']->hasHeader('Idempotency-Key'));
     }
 }

@@ -17,11 +17,23 @@ class PaymentIntents
 {
     public function __construct(private Client $http) {}
 
-    public function create(int $amount, string $currency, string $chain, array $metadata = []): array
-    {
+    /**
+     * Create a payment intent.
+     *
+     * `$idempotencyKey` makes it safe to retry: the same key with the same
+     * parameters returns the same intent instead of creating another one (and
+     * other parameters with the same key are an `idempotency_key_reused` error).
+     */
+    public function create(
+        int $amount,
+        string $currency,
+        string $chain,
+        array $metadata = [],
+        ?string $idempotencyKey = null,
+    ): array {
         return ApiRequest::send($this->http, 'POST', '/v1/payment_intents', [
             'json' => compact('amount', 'currency', 'chain', 'metadata'),
-        ]);
+        ] + ($idempotencyKey !== null && $idempotencyKey !== '' ? ['headers' => ['Idempotency-Key' => $idempotencyKey]] : []));
     }
 
     public function retrieve(string $intentId): array

@@ -9,6 +9,7 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Response;
 use CoatiPay\CoatiPay;
 use CoatiPay\Errors\CoatiPaySDKError;
+use CoatiPay\Errors\NetworkError;
 
 class PaymentIntentsTest extends TestCase
 {
@@ -82,12 +83,18 @@ class PaymentIntentsTest extends TestCase
 
     public function testApiErrorUnknownFormat(): void
     {
+        // Un error sin `code` no es una respuesta de CoatiPay: NetworkError con
+        // el status (vectores: errores.json, respuestas → error_sin_code).
         $client = $this->createClientWithMockResponse(new Response(500, [], json_encode(['error' => []])));
 
-        $this->expectException(CoatiPaySDKError::class);
-        $this->expectExceptionMessage('Unknown error');
-
-        $client->paymentIntents->retrieve('pi_fail');
+        try {
+            $client->paymentIntents->retrieve('pi_fail');
+            $this->fail('Debía lanzar');
+        } catch (NetworkError $e) {
+            $this->assertInstanceOf(CoatiPaySDKError::class, $e);
+            $this->assertSame('network_error', $e->errorCode);
+            $this->assertSame(500, $e->status);
+        }
     }
 
     private function clientWithMock(Response $response, MockHandler &$mock = null): CoatiPay

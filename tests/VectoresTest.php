@@ -9,7 +9,13 @@ use CoatiPay\Errors\CoatiPaySDKError;
 use CoatiPay\Errors\ErrorHandler;
 use CoatiPay\Errors\WebhookSignatureError;
 use CoatiPay\Webhooks;
+use CoatiPay\CoatiPay;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Psr7\Request;
+use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -182,5 +188,44 @@ class VectoresTest extends TestCase
         $d = self::vector('errores.json')['desconocido'];
         $e = ErrorHandler::classify(['code' => $d['code'], 'message' => 'm']);
         $this->assertSame($d['clase'], (new \ReflectionClass($e))->getShortName());
+    }
+
+    // ── respuestas de la API ───────────────────────────────────────
+
+    public static function respuestas(): iterable
+    {
+        foreach (self::vector('errores.json')['respuestas']['casos'] as $c) {
+            yield $c['nombre'] => [$c['respuesta'], $c['esperado']];
+        }
+    }
+
+    #[DataProvider('respuestas')]
+    public function testRespuesta(?array $respuesta, array $esperado): void
+    {
+        $simulada = $respuesta === null
+            ? new ConnectException('fallo de red', new Request('GET', '/v1/payment_intents/pi_vector'))
+            : new Response($respuesta['status'], [], $respuesta['cuerpo']);
+        $cliente = new CoatiPay('sk_test_vectores');
+        $prop = (new \ReflectionClass($cliente->paymentIntents))->getProperty('http');
+        $prop->setAccessible(true);
+        $prop->setValue($cliente->paymentIntents, new Client(['handler' => HandlerStack::create(new MockHandler([$simulada]))]));
+
+        if ($esperado['ok']) {
+            $this->assertSame(json_decode($respuesta['cuerpo'], true), $cliente->paymentIntents->retrieve('pi_vector'));
+            return;
+        }
+        try {
+            $cliente->paymentIntents->retrieve('pi_vector');
+            $this->fail('Debía lanzar');
+        } catch (CoatiPaySDKError $e) {
+            $this->assertSame($esperado['clase'], (new \ReflectionClass($e))->getShortName());
+            $this->assertSame(
+                [$esperado['code'], $esperado['param'], $esperado['doc_url']],
+                [$e->errorCode, $e->param, $e->docUrl],
+            );
+            if ($esperado['clase'] === 'NetworkError') {
+                $this->assertSame($esperado['status'], $e->status);
+            }
+        }
     }
 }

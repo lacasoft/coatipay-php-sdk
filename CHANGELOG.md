@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.1.4 — 2026-09-29
+
+### Changed
+
+- **One rule for the API's response, shared by every CoatiPay SDK** (vectors in
+  `@lacasoft/coatipay-protocol/vectors/errores.json`, `respuestas`):
+  - No response (network, DNS, timeout) throws **`NetworkError`** (`status`
+    null). It used to throw a `CoatiPaySDKError` with code `network_error`,
+    which `NetworkError` still is.
+  - A body that is not JSON — a proxy's HTML 502, an empty 503 — throws
+    `NetworkError` with its `status`. It used to throw a `CoatiPaySDKError`
+    with code `unknown_error`. **A 2xx that is not JSON used to return `[]`
+    silently**; it throws `NetworkError` now.
+  - An error response that is not a CoatiPay error (no `error.code`, such as
+    Fastify's default error) throws `NetworkError`, not `unknown_error`.
+  - A non-string `message`, `param` or `doc_url` in an API error no longer
+    causes a `TypeError`.
+- `CoatiPaySDKError` takes an optional `$previous`: the exception that caused
+  it (for `NetworkError`, the Guzzle one).
+
+### Added
+
+- **`paymentIntents->create(..., idempotencyKey: ...)`**, sent as the
+  `Idempotency-Key` header: the same key with the same parameters returns the
+  same intent, so a create can be retried after a `NetworkError`. Only the JS
+  SDK had it.
+- `CoatiPay\Errors\NetworkError`, with `status`.
+
+### Docs
+
+- README: error handling, `idempotencyKey`, webhook failure reasons, the dead-
+  letter queue, and how to change a webhook secret today (the API does not
+  rotate secrets yet).
+
 ## 0.1.3 — 2026-09-28
 
 ### Fixed
