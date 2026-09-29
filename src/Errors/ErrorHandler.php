@@ -18,11 +18,12 @@ class ErrorHandler
         // de JS y Python (vectores compartidos: errores.json). Un código que
         // este SDK no conoce (una API más nueva) es la clase base.
         $clase = self::CLASES[Catalogo::CATEGORIAS[$code] ?? ''] ?? CoatiPaySDKError::class;
+        $texto = static fn (string $clave): ?string => is_string($error[$clave] ?? null) ? $error[$clave] : null;
         return new $clase(
             $code,
-            $error['message'] ?? 'Unknown error',
-            $error['param'] ?? null,
-            $error['doc_url'] ?? null,
+            $texto('message') ?? 'Unknown error',
+            $texto('param'),
+            $texto('doc_url'),
         );
     }
 

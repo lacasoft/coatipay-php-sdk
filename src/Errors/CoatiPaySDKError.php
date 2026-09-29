@@ -7,9 +7,9 @@ namespace CoatiPay\Errors;
 use Exception;
 
 /**
- * Error returned by the CoatiPay API.
- *
- * Mirrors the JS SDK's CoatiPaySDKError shape.
+ * Everything an API call throws: the API's errors, classified by category,
+ * and NetworkError when there was no CoatiPay answer. One `catch` covers them
+ * all, as in the JS and Python SDKs.
  * Note: PHP's Exception already owns the protected int $code property,
  * so the string error code is exposed as $errorCode.
  */
@@ -23,14 +23,15 @@ class CoatiPaySDKError extends Exception
         string $code,
         string $message,
         ?string $param = null,
-        ?string $docUrl = null
+        ?string $docUrl = null,
+        ?\Throwable $previous = null,
     ) {
-        parent::__construct($message);
+        parent::__construct($message, 0, $previous);
         $this->errorCode = $code;
         $this->param     = $param;
         // Sin doc_url: la página del código si es del catálogo, o el índice de
-        // errores (p. ej. un fallo de red). Antes era https://docs.coatipay.com,
-        // que no existe.
+        // errores (un código que pone el SDK sin página propia, como
+        // api_key_required). Antes era https://docs.coatipay.com, que no existe.
         $this->docUrl = $docUrl ?? (isset(Catalogo::CATEGORIAS[$code])
             ? "https://coatipay.com/docs/errors/{$code}"
             : 'https://coatipay.com/docs/errors/');
