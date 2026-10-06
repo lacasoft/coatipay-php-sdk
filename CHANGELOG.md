@@ -1,5 +1,12 @@
 # Changelog
 
+## Withdrawn versions — 2026-10-06
+
+**v0.1.2, v0.1.3 and v0.1.4 cannot cancel a payment or replay a webhook delivery**: they
+declare `Content-Type: application/json` on every request, and the API rejects a POST that
+declares JSON and arrives empty (see 0.1.5 below). Their tags were deleted, so **Packagist
+no longer offers them**. Use **v0.1.5 or later**.
+
 ## 0.1.5 — 2026-10-06
 
 ### Added
