@@ -38,9 +38,12 @@ class CoatiPay
         $this->http = new Client([
             'base_uri' => rtrim($baseUrl, '/'),
             'timeout'  => $timeout,
+            // Sin `Content-Type` por defecto: Guzzle lo pone cuando hay cuerpo
+            // JSON. Declararlo en un POST sin cuerpo (cancel, replay) hace que
+            // la API lo rechace: «Body cannot be empty when content-type is set
+            // to 'application/json'».
             'headers'  => [
                 'Authorization'     => "Bearer {$apiKey}",
-                'Content-Type'      => 'application/json',
                 'CoatiPay-Version' => '0.1',
             ],
         ]);

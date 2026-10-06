@@ -93,6 +93,31 @@ class Webhooks
         ]);
     }
 
+    /**
+     * Rotate an endpoint's signing secret. The new `secret` is only returned
+     * here: store it. Secret key.
+     *
+     * The previous secret keeps signing next to the new one for
+     * `$keepPreviousFor` seconds — 24 h by default, up to 7 days. Meanwhile
+     * every delivery carries two `v1` signatures and `verify()` accepts either,
+     * so you can change the secret on your server without dropping a delivery.
+     * With `0` the previous secret stops signing at once: for one that leaked.
+     * Only two secrets ever coexist: rotating again within the window retires
+     * the oldest.
+     *
+     * @return array{id: string, url: string, events: list<string>, secret: string, previous_secret_expires_at: int|null}
+     */
+    public function rotateSecret(string $id, ?int $keepPreviousFor = null): array
+    {
+        return ApiRequest::send(
+            $this->http,
+            'POST',
+            '/v1/webhooks/' . rawurlencode($id) . '/rotate_secret',
+            // Sin plazo no se manda cuerpo: lo pone la API.
+            $keepPreviousFor !== null ? ['json' => ['keep_previous_for' => $keepPreviousFor]] : [],
+        );
+    }
+
     /** Deliveries that exhausted their retries, newest first. Secret key. */
     public function listDeadLetters(?int $limit = null): array
     {
