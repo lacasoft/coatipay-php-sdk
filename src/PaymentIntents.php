@@ -68,6 +68,8 @@ class PaymentIntents
      * dentro, para que nadie tenga que calcular el keccak a mano y equivocarse.
      *
      * @param string $intentId Identificador del intent tal cual lo devuelve la API (`pi_…`).
+     * @param string $merchant La cartera del comercio: el `merchant_wallet` del PaymentIntent.
+     *                         Entra en el nonce (ADR-009).
      * @param array<string, mixed> $options `validAfter` / `validBefore`, en segundos Unix.
      * @return array<string, mixed>
      */
@@ -77,9 +79,18 @@ class PaymentIntents
         string $settlementHub,
         string $chain,
         string $intentId,
+        string $merchant,
         array $options = [],
     ): array {
-        return Eip712::buildAuthorizationTypedData($payer, $amount, $settlementHub, $chain, $intentId, $options);
+        return Eip712::buildAuthorizationTypedData(
+            $payer,
+            $amount,
+            $settlementHub,
+            $chain,
+            $intentId,
+            $merchant,
+            $options,
+        );
     }
 
     /**
@@ -89,6 +100,8 @@ class PaymentIntents
      *
      * @param string $intentId Identificador del intent tal cual lo devuelve la API (`pi_…`);
      *                         el bytes32 del nonce se deriva dentro.
+     * @param string $merchant La cartera del comercio: el `merchant_wallet` del PaymentIntent.
+     *                         Entra en el nonce (ADR-009): la firma solo paga a esa cartera.
      * @param array<string, mixed> $options `validAfter` / `validBefore`, en segundos Unix.
      */
     public function signAuthorization(
@@ -97,10 +110,20 @@ class PaymentIntents
         string $settlementHub,
         string $chain,
         string $intentId,
+        string $merchant,
         string $privateKey,
         array $options = [],
     ): SignedAuthorization {
-        return Eip712::signAuthorization($payer, $amount, $settlementHub, $chain, $intentId, $privateKey, $options);
+        return Eip712::signAuthorization(
+            $payer,
+            $amount,
+            $settlementHub,
+            $chain,
+            $intentId,
+            $merchant,
+            $privateKey,
+            $options,
+        );
     }
 
     public function submitAuthorization(string $intentId, SignedAuthorization $authorization): array
