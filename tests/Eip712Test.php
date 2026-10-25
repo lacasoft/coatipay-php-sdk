@@ -17,6 +17,9 @@ class Eip712Test extends TestCase
     /** Otro intent cualquiera, para comprobar que una firma no sirve para los dos. */
     private const OTRO_INTENT_ID = 'pi_otro_002';
 
+    /** La cartera del comercio del cobro (`merchant_wallet`): entra en el nonce (ADR-009). */
+    private const MERCHANT = '0x2222222222222222222222222222222222222222';
+
     public function testBuildAuthorizationTypedData(): void
     {
         $typed = Eip712::buildAuthorizationTypedData(
@@ -25,6 +28,7 @@ class Eip712Test extends TestCase
             '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
             'base-sepolia',
             self::INTENT_ID,
+            self::MERCHANT,
             [
                 'validAfter' => 0,
                 'validBefore' => 2_000_000_000,
@@ -45,7 +49,7 @@ class Eip712Test extends TestCase
         $this->assertEquals(2_000_000_000, $msg['validBefore']);
         // El campo del mensaje se sigue llamando `nonce` (lo fija ERC-3009);
         // lo que cambia es de dónde sale su valor: del id textual, hasheado.
-        $this->assertEquals(Eip712::intentIdToBytes32(self::INTENT_ID), $msg['nonce']);
+        $this->assertEquals(Eip712::intentIdOf(self::MERCHANT, self::INTENT_ID), $msg['nonce']);
         $this->assertMatchesRegularExpression('/^0x[0-9a-f]{64}$/', $msg['nonce']);
     }
 
@@ -60,59 +64,79 @@ class Eip712Test extends TestCase
             '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
             'base-sepolia',
             'pi_abc123',
+            self::MERCHANT,
         );
 
         // Y la derivación ocurre dentro: al integrador se le pide el `pi_…` que
         // ya tiene, no un keccak que podría calcular mal sin enterarse hasta
         // que la liquidación falle.
-        $this->assertEquals(Eip712::intentIdToBytes32('pi_abc123'), $typed['message']['nonce']);
+        $this->assertEquals(Eip712::intentIdOf(self::MERCHANT, 'pi_abc123'), $typed['message']['nonce']);
     }
 
-    public function testIntentIdToBytes32EsKeccakDelTextoUtf8(): void
+    public function testIntentRefEsKeccakDelTextoUtf8(): void
     {
         // Vector fijo, el mismo que produce el SDK de JavaScript con
-        // `intentIdToBytes32('pi_test_001')`. Si esta constante cambia, las dos
-        // implementaciones han dejado de derivar el mismo nonce.
+        // `intentRef('pi_test_001')`. Si esta constante cambia, las dos
+        // implementaciones han dejado de derivar lo mismo.
         $this->assertEquals(
             '0x4ce0f8f8b3c1ae4648b44946a8d3555a9a04f476786f1b4260923079b1a0253c',
-            Eip712::intentIdToBytes32('pi_test_001')
+            Eip712::intentRef('pi_test_001')
         );
         // Es literalmente keccak256 sobre los bytes utf-8 del id.
         $this->assertEquals(
             '0x' . \kornrunner\Keccak::hash('pi_test_001', 256),
-            Eip712::intentIdToBytes32('pi_test_001')
+            Eip712::intentRef('pi_test_001')
         );
     }
 
-    public function testFirmaAtadaAlIntentTambienAlFirmar(): void
+    public function testIntentIdOfLlevaLaCarteraDelComercio(): void
     {
-        // Lo mismo, pero de punta a punta: la autorización firmada arrastra el
-        // intent en su nonce, y firmar el mismo pago para otro intent produce
-        // otra firma. Es decir: una firma sirve para un solo intent.
-        $auth = Eip712::signAuthorization(
+        // Vector fijo, el que calculan el paquete del protocolo, el SDK de
+        // JavaScript y el hub: keccak256(abi.encode(merchant, intentRef(id))).
+        $this->assertEquals(
+            '0x49b48a490b8527d2af148b118ed2eba075935d53fc90962ecfca1b29378ba541',
+            Eip712::intentIdOf(self::MERCHANT, 'pi_abc123')
+        );
+        // Otra cartera, otro nonce: la firma del pagador fija a quién paga.
+        $this->assertNotEquals(
+            Eip712::intentIdOf(self::MERCHANT, 'pi_abc123'),
+            Eip712::intentIdOf('0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1', 'pi_abc123')
+        );
+    }
+
+    public function testRechazaUnaCarteraMalFormadaOCero(): void
+    {
+        foreach (['', '0x1234', '0x' . str_repeat('00', 20)] as $mala) {
+            try {
+                Eip712::intentIdOf($mala, 'pi_abc123');
+                $this->fail("aceptó la cartera {$mala}");
+            } catch (\InvalidArgumentException $e) {
+                $this->assertStringContainsString('merchant', $e->getMessage());
+            }
+        }
+    }
+
+    public function testLaFirmaDeAntesFallaEnVezDeFirmarMal(): void
+    {
+        // Las dos formas de llamar de 0.1.x fallan en voz alta, en vez de firmar
+        // un nonce que el hub nuevo no aceptaría: sin opciones faltan
+        // argumentos; con opciones, el array cae donde va la clave privada.
+        $antes = [
             '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             1_000_000,
             '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
             'base-sepolia',
             self::INTENT_ID,
             '0x' . str_repeat('11', 32),
-            ['validAfter' => 0, 'validBefore' => 2_000_000_000],
-        );
-
-        $otra = Eip712::signAuthorization(
-            '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-            1_000_000,
-            '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
-            'base-sepolia',
-            self::OTRO_INTENT_ID,
-            '0x' . str_repeat('11', 32),
-            ['validAfter' => 0, 'validBefore' => 2_000_000_000],
-        );
-
-        $this->assertEquals(Eip712::intentIdToBytes32(self::INTENT_ID), $auth->nonce);
-        $this->assertEquals(Eip712::intentIdToBytes32(self::OTRO_INTENT_ID), $otra->nonce);
-        $this->assertNotEquals($auth->nonce, $otra->nonce);
-        $this->assertNotEquals($auth->signature, $otra->signature);
+        ];
+        foreach ([$antes, [...$antes, ['validAfter' => 0]]] as $argumentos) {
+            try {
+                Eip712::signAuthorization(...$argumentos);
+                $this->fail('firmó con la forma de llamar de 0.1.x');
+            } catch (\TypeError $e) {
+                $this->addToAssertionCount(1);
+            }
+        }
     }
 
     public function testRechazaUnIntentIdVacio(): void
@@ -128,6 +152,7 @@ class Eip712Test extends TestCase
             '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
             'base-sepolia',
             '',
+            self::MERCHANT,
         );
     }
 
@@ -139,7 +164,7 @@ class Eip712Test extends TestCase
         // liquidar. Un id de la API es `pi_…`, nunca 0x + 64 hex.
         $this->expectException(\InvalidArgumentException::class);
 
-        Eip712::intentIdToBytes32('0x' . str_repeat('be', 32));
+        Eip712::intentRef('0x' . str_repeat('be', 32));
     }
 
     public function testSignAuthorizationMatchesJsSdkReference(): void
@@ -149,11 +174,13 @@ class Eip712Test extends TestCase
         // cambio de entrada — ahora el intent entra como texto `pi_…` y el
         // nonce sale de derivarlo, así que el digest firmado es otro.
         //
-        // Generado con @lacasoft/coatipay-sdk:
+        // Generado con @lacasoft/coatipay-sdk 0.2.0 (ADR-009: el nonce lleva la
+        // cartera del comercio):
         //   signReceiveAuthorization({
         //     payer: '0xaaaa…aa', amount: 1_000_000n,
         //     settlementHub: '0xe2D6…E0e1', chain: 'base-sepolia',
-        //     intentId: 'pi_test_001', validAfter: 0n, validBefore: 2_000_000_000n,
+        //     intentId: 'pi_test_001', merchant: '0x2222…22',
+        //     validAfter: 0n, validBefore: 2_000_000_000n,
         //   }, '0x1111…11')
         $intentId = self::INTENT_ID;
 
@@ -163,6 +190,7 @@ class Eip712Test extends TestCase
             '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
             'base-sepolia',
             $intentId,
+            self::MERCHANT,
             '0x' . str_repeat('11', 32),
             [
                 'validAfter' => 0,
@@ -170,10 +198,10 @@ class Eip712Test extends TestCase
             ]
         );
 
-        $expectedNonce = '0x4ce0f8f8b3c1ae4648b44946a8d3555a9a04f476786f1b4260923079b1a0253c';
+        $expectedNonce = '0xe6ac3357ad9549c03bf4e428efdd5f46f4c2b3ec9a2e84c67fbc4398a295fde5';
         $expectedSignature =
-            '0x6aca1f4b2536c4bcceec0baf128257e8740b79f9461c555fb51d329424515770' .
-            '03d4762e713650a8803af2b34c613f16ba40200f661c2c4ace469958b58963821c';
+            '0x2c3cf9f94a42eb5e60141e1ab005c6fc5d0e4709ceb1a33892042b658ab9b165' .
+            '3d4df79dc2b4637b755b4e7e614cc36b3b386ceed4c5d6e9914e7698d462984a1c';
 
         $this->assertEquals('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', $auth->payer);
         $this->assertEquals(0, $auth->validAfter);
@@ -206,7 +234,7 @@ class Eip712Test extends TestCase
             '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             0,
             2_000_000_000,
-            Eip712::intentIdToBytes32(self::INTENT_ID),
+            Eip712::intentIdOf(self::MERCHANT, self::INTENT_ID),
             '0x' . str_repeat('11', 65),
         );
 
@@ -216,7 +244,7 @@ class Eip712Test extends TestCase
         $this->assertEquals('0', $serialized['valid_after']);
         $this->assertEquals('2000000000', $serialized['valid_before']);
         // El wire format sigue mandando el campo `nonce`, con el intent dentro.
-        $this->assertEquals(Eip712::intentIdToBytes32(self::INTENT_ID), $serialized['nonce']);
+        $this->assertEquals(Eip712::intentIdOf(self::MERCHANT, self::INTENT_ID), $serialized['nonce']);
         $this->assertEquals('0x' . str_repeat('11', 65), $serialized['signature']);
     }
 
@@ -228,6 +256,7 @@ class Eip712Test extends TestCase
             '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
             'base-sepolia',
             self::INTENT_ID,
+            self::MERCHANT,
             [
                 'validAfter' => 0,
                 'validBefore' => 2_000_000_000,
@@ -255,6 +284,7 @@ class Eip712Test extends TestCase
                 '0xe2D6EaF23c285E827f37dC5Ec05fFfD860dBE0e1',
                 'base-sepolia',
                 $intentId,
+                self::MERCHANT,
                 '0x' . str_repeat('11', 32),
                 [
                     'validAfter' => 0,

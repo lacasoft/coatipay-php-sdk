@@ -40,28 +40,34 @@ class VectoresTest extends TestCase
     public static function nonces(): iterable
     {
         foreach (self::vector('nonce.json')['casos'] as $c) {
-            yield json_encode($c['intent_id']) => [$c['intent_id'], $c['nonce']];
+            yield json_encode($c['intent_id']) . " {$c['merchant']}" => [
+                $c['intent_id'],
+                $c['merchant'],
+                $c['ref'],
+                $c['nonce'],
+            ];
         }
     }
 
     #[DataProvider('nonces')]
-    public function testNonce(string $intentId, string $nonce): void
+    public function testNonce(string $intentId, string $merchant, string $ref, string $nonce): void
     {
-        $this->assertSame($nonce, Eip712::intentIdToBytes32($intentId));
+        $this->assertSame($ref, Eip712::intentRef($intentId));
+        $this->assertSame($nonce, Eip712::intentIdOf($merchant, $intentId));
     }
 
     public static function rechazados(): iterable
     {
         foreach (self::vector('nonce.json')['rechazados'] as $r) {
-            yield $r['motivo'] => [$r['intent_id']];
+            yield $r['motivo'] => [$r['intent_id'], $r['merchant']];
         }
     }
 
     #[DataProvider('rechazados')]
-    public function testNonceRechazado(string $intentId): void
+    public function testNonceRechazado(string $intentId, string $merchant): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        Eip712::intentIdToBytes32($intentId);
+        Eip712::intentIdOf($merchant, $intentId);
     }
 
     // ── autorización ERC-3009 ──────────────────────────────────────
@@ -92,6 +98,7 @@ class VectoresTest extends TestCase
             $e['settlement_hub'],
             $e['chain'],
             $e['intent_id'],
+            $e['merchant'],
         ];
     }
 

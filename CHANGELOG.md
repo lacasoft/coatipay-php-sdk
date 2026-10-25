@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.2.0 — 2026-10-25
+
+For the SettlementHub of ADR-009. **Breaking**: an authorization signed with
+v0.1.x does not settle on the new hub, nor one signed with v0.2.0 on the old one.
+
+### Changed
+
+- **The nonce carries the merchant's wallet.** The on-chain id of a payment —
+  and so the nonce the payer signs — is now
+  `keccak256(abi.encode(merchant, keccak256(utf8(id))))`, the same as
+  `SettlementHub.intentIdOf`: the payer's signature fixes who gets paid.
+  `Eip712::buildAuthorizationTypedData` / `Eip712::signAuthorization` (and the
+  `PaymentIntents` methods that wrap them) take a new required **`$merchant`**
+  right after `$intentId`: the `merchant_wallet` of the PaymentIntent. A
+  malformed or zero wallet throws `InvalidArgumentException`; a call written
+  for v0.1.x fails with a `TypeError` instead of signing a nonce that would not
+  settle.
+- Shared vectors from `@lacasoft/coatipay-protocol` 0.2.0 (format 2).
+
+### Removed
+
+- **`Eip712::intentIdToBytes32`**: with the new hub it would produce a nonce that
+  does not settle. Use **`Eip712::intentIdOf($merchant, $id)`**, or
+  **`Eip712::intentRef($id)`** for the old half (`keccak256(utf8(id))`).
+
 ## Withdrawn versions — 2026-10-06
 
 **v0.1.2, v0.1.3 and v0.1.4 cannot cancel a payment or replay a webhook delivery**: they

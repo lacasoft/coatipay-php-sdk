@@ -55,24 +55,26 @@ $auth = Eip712::signAuthorization(
     amount:   1_000_000,                       // 1.00 USDC
     settlementHub: '0xSettlementHubAddress...',
     chain:    'base',
-    intentId: $intent['id'],                    // the "pi_…" the API returned — becomes the nonce
+    intentId: $intent['id'],                    // the "pi_…" the API returned — goes into the nonce
+    merchant: $intent['merchant_wallet'],       // the merchant's wallet — goes into the nonce too
     privateKey: '0x...',                        // payer private key — server-side demo only
 );
 
 $relay->paymentIntents->submitAuthorization($intent['id'], $auth);
 ```
 
-`intentId` is required: the authorization's ERC-3009 nonce **is** that intent.
-The SettlementHub enforces `nonce == keccak256(utf8(intentId))`, so a signature
-can only ever pay the intent it was signed for — the nodeit that submits the
-transaction cannot redirect it to a different intent.
+`intentId` and `merchant` are required: the authorization's ERC-3009 nonce
+**is** the intent's on-chain id, `keccak256(abi.encode(merchant, keccak256(utf8(intentId))))`
+(`SettlementHub.intentIdOf`). So a signature can only ever pay that intent, to
+that wallet — neither the nodeit that submits the transaction nor anyone who
+authorizes registrations can redirect it.
 
 Pass the plain `pi_…` id: the SDK derives the on-chain `bytes32` for you, so
 there is no hash to get wrong. If you build the typed data yourself, derive it
 with the same helper the SDK uses:
 
 ```php
-$nonce = Eip712::intentIdToBytes32('pi_abc123'); // 0x… (32 bytes)
+$nonce = Eip712::intentIdOf($intent['merchant_wallet'], 'pi_abc123'); // 0x… (32 bytes)
 ```
 
 For batch settlement, pass a list of `['intent_id' => ..., 'authorization' => $auth]`
