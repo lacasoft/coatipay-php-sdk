@@ -15,7 +15,37 @@ use CoatiPay\Http\ApiRequest;
  */
 class PaymentIntents
 {
+    /**
+     * La forma del id de un cobro que da la API: `pi_` y después letras ASCII,
+     * dígitos, `_` o `-`, y nada más. La misma regla en los tres SDK (vectores
+     * compartidos, `ids.json`). Se usa con el modificador `D`: sin él, `$`
+     * acepta un salto de línea final.
+     */
+    public const PAYMENT_INTENT_ID_PATTERN = '^pi_[A-Za-z0-9_-]+$';
+
     public function __construct(private Client $http) {}
+
+    /** ¿Tiene `$value` la forma de un id de cobro (`pi_…`)? */
+    public static function isPaymentIntentId(mixed $value): bool
+    {
+        return is_string($value) && preg_match('/' . self::PAYMENT_INTENT_ID_PATTERN . '/D', $value) === 1;
+    }
+
+    /**
+     * La ruta de un cobro. El id va dentro de la ruta: con `/`, `?` o `..`, la
+     * petición, con la clave del comercio, llegaría a otra ruta de la API. Se
+     * comprueba su forma antes de hacer la petición, y se codifica.
+     */
+    private static function rutaDelCobro(string $intentId): string
+    {
+        if (!self::isPaymentIntentId($intentId)) {
+            throw new \InvalidArgumentException(
+                'Invalid payment intent id (expected pi_…): '
+                . json_encode(substr($intentId, 0, 64), JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)
+            );
+        }
+        return '/v1/payment_intents/' . rawurlencode($intentId);
+    }
 
     /**
      * Create a payment intent.
@@ -36,14 +66,20 @@ class PaymentIntents
         ] + ($idempotencyKey !== null && $idempotencyKey !== '' ? ['headers' => ['Idempotency-Key' => $idempotencyKey]] : []));
     }
 
+    /**
+     * @throws \InvalidArgumentException if `$intentId` is not a payment intent id (`pi_…`); no request is made.
+     */
     public function retrieve(string $intentId): array
     {
-        return ApiRequest::send($this->http, 'GET', "/v1/payment_intents/{$intentId}");
+        return ApiRequest::send($this->http, 'GET', self::rutaDelCobro($intentId));
     }
 
+    /**
+     * @throws \InvalidArgumentException if `$intentId` is not a payment intent id (`pi_…`); no request is made.
+     */
     public function cancel(string $intentId): array
     {
-        return ApiRequest::send($this->http, 'POST', "/v1/payment_intents/{$intentId}/cancel");
+        return ApiRequest::send($this->http, 'POST', self::rutaDelCobro($intentId) . '/cancel');
     }
 
     public function list(int $limit = 10, ?string $startingAfter = null): array
@@ -126,12 +162,15 @@ class PaymentIntents
         );
     }
 
+    /**
+     * @throws \InvalidArgumentException if `$intentId` is not a payment intent id (`pi_…`); no request is made.
+     */
     public function submitAuthorization(string $intentId, SignedAuthorization $authorization): array
     {
         return ApiRequest::send(
             $this->http,
             'POST',
-            "/v1/payment_intents/{$intentId}/authorize",
+            self::rutaDelCobro($intentId) . '/authorize',
             ['json' => Eip712::serializeAuthorization($authorization)],
         );
     }
