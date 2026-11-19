@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.2.1 — 2026-11-19
+
+Security fix. **Upgrade if you pass a payment id that you did not get from the
+API to `retrieve`, `cancel` or `submitAuthorization`.**
+
+### Security
+
+- **Payment ids are validated and encoded before going into a request
+  path.** `paymentIntents->retrieve`, `cancel` and `submitAuthorization` put
+  the id into `/v1/payment_intents/<id>…` as given: an id such as
+  `../webhooks` sent the request, with the merchant's secret key, to another
+  API route. Now an id that is not `pi_` followed by letters, digits, `_` or
+  `-` throws `InvalidArgumentException` without making the request, and the id
+  is URL-encoded (`rawurlencode`). The check uses the `D` modifier: without
+  it, `$` accepts a trailing newline. The rule is the shared vector `ids.json`
+  of `@lacasoft/coatipay-protocol` 0.2.1, the same in the three SDKs.
+
+### Added
+
+- `PaymentIntents::isPaymentIntentId($value)` and
+  `PaymentIntents::PAYMENT_INTENT_ID_PATTERN`.
+
 ## v0.2.0 — 2026-10-25
 
 For the SettlementHub of ADR-009. **Breaking**: an authorization signed with

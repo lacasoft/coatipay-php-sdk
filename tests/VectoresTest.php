@@ -8,12 +8,15 @@ use CoatiPay\Eip712;
 use CoatiPay\Errors\CoatiPaySDKError;
 use CoatiPay\Errors\ErrorHandler;
 use CoatiPay\Errors\WebhookSignatureError;
+use CoatiPay\PaymentIntents;
+use CoatiPay\SignedAuthorization;
 use CoatiPay\Webhooks;
 use CoatiPay\CoatiPay;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -195,6 +198,81 @@ class VectoresTest extends TestCase
         $d = self::vector('errores.json')['desconocido'];
         $e = ErrorHandler::classify(['code' => $d['code'], 'message' => 'm']);
         $this->assertSame($d['clase'], (new \ReflectionClass($e))->getShortName());
+    }
+
+    // ── id de cobro en la ruta ─────────────────────────────────────
+
+    /** Un cliente cuyas peticiones se apuntan en `$historial` y responden `{}`. */
+    private static function clienteQueApunta(array &$historial): CoatiPay
+    {
+        $cliente = new CoatiPay('sk_test_vectores');
+        $pila = HandlerStack::create(new MockHandler(array_fill(0, 3, new Response(200, [], '{}'))));
+        $pila->push(Middleware::history($historial));
+        $prop = (new \ReflectionClass($cliente->paymentIntents))->getProperty('http');
+        $prop->setValue($cliente->paymentIntents, new Client(['handler' => $pila, 'base_uri' => 'https://api.test']));
+        return $cliente;
+    }
+
+    /** @return list<array{string, string, callable}> */
+    private static function llamadas(CoatiPay $cliente, string $id): array
+    {
+        $auth = new SignedAuthorization('0x0000000000000000000000000000000000000001', 0, 1, '0x' . str_repeat('00', 32), '0x00');
+        return [
+            ['GET', "/v1/payment_intents/{$id}", fn () => $cliente->paymentIntents->retrieve($id)],
+            ['POST', "/v1/payment_intents/{$id}/cancel", fn () => $cliente->paymentIntents->cancel($id)],
+            ['POST', "/v1/payment_intents/{$id}/authorize", fn () => $cliente->paymentIntents->submitAuthorization($id, $auth)],
+        ];
+    }
+
+    public function testIdsPatronDelProtocolo(): void
+    {
+        $this->assertSame(self::vector('ids.json')['patron'], PaymentIntents::PAYMENT_INTENT_ID_PATTERN);
+    }
+
+    public static function idsAceptados(): iterable
+    {
+        foreach (self::vector('ids.json')['aceptados'] as $id) {
+            yield $id => [$id];
+        }
+    }
+
+    #[DataProvider('idsAceptados')]
+    public function testIdAceptadoVaASuRuta(string $id): void
+    {
+        $historial = [];
+        $cliente = self::clienteQueApunta($historial);
+        $esperado = [];
+        foreach (self::llamadas($cliente, $id) as [$metodo, $ruta, $llamar]) {
+            $llamar();
+            $esperado[] = [$metodo, $ruta];
+        }
+        $this->assertSame(
+            $esperado,
+            array_map(fn (array $h) => [$h['request']->getMethod(), $h['request']->getUri()->getPath()], $historial),
+        );
+    }
+
+    public static function idsRechazados(): iterable
+    {
+        foreach (self::vector('ids.json')['rechazados'] as $c) {
+            yield $c['motivo'] => [$c['id']];
+        }
+    }
+
+    #[DataProvider('idsRechazados')]
+    public function testIdRechazadoSinPeticion(string $id): void
+    {
+        $this->assertFalse(PaymentIntents::isPaymentIntentId($id));
+        $historial = [];
+        $cliente = self::clienteQueApunta($historial);
+        foreach (self::llamadas($cliente, $id) as [, , $llamar]) {
+            try {
+                $llamar();
+                $this->fail('Debía lanzar sin hacer la petición: ' . json_encode($id));
+            } catch (\InvalidArgumentException) {
+            }
+        }
+        $this->assertSame([], $historial);
     }
 
     // ── respuestas de la API ───────────────────────────────────────
